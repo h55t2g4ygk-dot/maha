@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAHA AI Assistant</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #F5EDD8; font-family: system-ui, -apple-system, sans-serif; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeIn 0.4s ease; }
+    textarea:focus { outline: none; border-color: #1B3A2D !important; }
+    button:disabled { cursor: not-allowed !important; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    const SYSTEM_PROMPT = `You are MAHA AI Assistant, an expert nutrition analyst aligned with the Make America Healthy Again movement. Evaluate recipes for MAHA compliance.
+
+MAHA health priorities:
+1. No seed oils (canola, soybean, sunflower, safflower, corn, cottonseed, grapeseed) — use butter, lard, tallow, olive oil, coconut oil instead
+2. No ultra-processed ingredients — no artificial colors, flavors, preservatives, emulsifiers
+3. No high-fructose corn syrup or excessive refined sugar
+4. No artificial sweeteners (aspartame, sucralose, acesulfame-K, etc.)
+5. No glyphosate-heavy conventional grains — prefer organic, heritage, or sourdough
+6. Whole, real food ingredients
+7. Grass-fed/pasture-raised animal products preferred
+8. Raw dairy or full-fat dairy preferred over skim/low-fat processed dairy
+9. No MSG or artificial flavor enhancers
+10. Nutrient density — rich in vitamins, minerals, healthy fats, protein
+11. No soy products unless fermented (tempeh, miso, natto)
+12. Organic produce preferred
+
+Score 0–100. Respond ONLY with valid JSON, no markdown, no preamble:
+{
+  "score": <number>,
+  "verdict": "<one punchy sentence>",
+  "compliant_items": ["<item>"],
+  "concerns": ["<concern>"],
+  "suggestions": ["<suggestion>"],
+  "summary": "<2-3 sentence assessment>"
+}`;
+
+    function ScoreMeter({ score, animating }) {
+      const radius = 80, stroke = 12;
+      const nr = radius - stroke / 2;
+      const circ = nr * 2 * Math.PI;
+      const arc = circ * 0.75;
+      const offset = arc - (score / 100) * arc;
+      const color = score >= 80 ? "#2D7A4F" : score >= 60 ? "#C8841A" : score >= 40 ? "#D4742A" : "#C23B22";
+      const label = score >= 90 ? "Exemplary" : score >= 70 ? "Good" : score >= 50 ? "Moderate" : score >= 30 ? "Poor" : "Non-Compliant";
+
+      return (
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:"4px"}}>
+          <svg width={radius*2} height={radius*1.5} style={{overflow:"visible"}}>
+            <circle stroke="#E8DCC8" fill="transparent" strokeWidth={stroke}
+              strokeDasharray={`${arc} ${circ}`} strokeLinecap="round"
+              r={nr} cx={radius} cy={radius}
+              style={{transform:"rotate(135deg)",transformOrigin:`${radius}px ${radius}px`}} />
+            <circle stroke={color} fill="transparent" strokeWidth={stroke}
+              strokeDasharray={`${arc} ${circ}`}
+              strokeDashoffset={animating ? arc : offset}
+              strokeLinecap="round" r={nr} cx={radius} cy={radius}
+              style={{transform:"rotate(135deg)",transformOrigin:`${radius}px ${radius}px`,
+                transition: animating ? "none" : "stroke-dashoffset 1.4s cubic-bezier(0.34,1.56,0.64,1)"}} />
+            <text x={radius} y={radius+8} textAnchor="middle"
+              style={{fontFamily:"Georgia,serif",fontSize:"36px",fontWeight:"700",fill:color}}>{score}</text>
+            <text x={radius} y={radius+26} textAnchor="middle"
+              style={{fontFamily:"system-ui",fontSize:"11px",fill:"#7A6B55",letterSpacing:"0.08em"}}>/100</text>
+          </svg>
+          <span style={{fontFamily:"Georgia,serif",fontSize:"15px",fontWeight:"600",color,letterSpacing:"0.04em",marginTop:"-8px"}}>{label}</span>
+        </div>
+      );
+    }
+
+    function Tag({ type, children }) {
+      const s = {
+        good: {bg:"#E8F5EE",color:"#1B5E35",border:"#A8D5BC"},
+        warn: {bg:"#FDF3E3",color:"#7A4F00",border:"#F0C878"},
+        tip:  {bg:"#EDF4FB",color:"#1A4A72",border:"#A8C8E8"},
+      }[type];
+      return (
+        <span style={{display:"inline-block",background:s.bg,color:s.color,border:`1px solid ${s.border}`,
+          borderRadius:"4px",padding:"3px 8px",fontSize:"13px",lineHeight:"1.4",marginBottom:"2px"}}>
+          {children}
+        </span>
+      );
+    }
+
+    function App() {
+      const [recipe, setRecipe] = useState("");
+      const [result, setResult] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [animating, setAnimating] = useState(false);
+
+      const examples = [
+        { label: "Grass-Fed Beef Stew", text: "Grass-fed beef chuck, organic carrots, organic potatoes, organic onions, garlic, beef bone broth (homemade), butter, fresh thyme, rosemary, sea salt, black pepper" },
+        { label: "Classic Ranch Dip", text: "Sour cream, mayonnaise (canola oil), Hidden Valley Ranch packet (contains MSG, maltodextrin, natural flavors, modified starch), garlic powder, onion powder" },
+        { label: "Banana Pancakes", text: "Eggs, ripe bananas, oat flour, baking powder, vanilla extract, coconut oil, maple syrup, pinch of sea salt" },
+      ];
+
+      const analyze = async () => {
+        if (!recipe.trim()) return;
+        setLoading(true); setError(null); setResult(null);
+        try {
+          const res = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "claude-sonnet-4-6",
+              max_tokens: 1000,
+              system: SYSTEM_PROMPT,
+              messages: [{ role: "user", content: `Analyze this recipe:\n\n${recipe}` }],
+            }),
+          });
+          const data = await res.json();
+          const text = data.content?.find(b => b.type === "text")?.text || "";
+          const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+          setAnimating(true);
+          setResult(parsed);
+          setTimeout(() => setAnimating(false), 50);
+        } catch (e) {
+          setError("Analysis failed. Please try again.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div style={{minHeight:"100vh",background:"#F5EDD8"}}>
+          {/* Header */}
+          <header style={{background:"#1B3A2D",padding:"20px 24px",display:"flex",alignItems:"center",gap:"14px",boxShadow:"0 2px 12px rgba(0,0,0,0.2)"}}>
+            <div style={{width:"44px",height:"44px",borderRadius:"50%",background:"#C8841A",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"22px",flexShrink:0}}>🌿</div>
+            <div>
+              <div style={{fontFamily:"Georgia,serif",fontSize:"22px",fontWeight:"700",color:"#F5EDD8",letterSpacing:"0.02em",lineHeight:"1.1"}}>MAHA AI Assistant</div>
+              <div style={{fontSize:"11px",color:"#8FB49A",letterSpacing:"0.12em",textTransform:"uppercase"}}>Make America Healthy Again · Recipe Analyzer</div>
+            </div>
+          </header>
+
+          <div style={{maxWidth:"680px",margin:"0 auto",padding:"28px 20px"}}>
+            {/* Input card */}
+            <div style={{background:"#FFF8EC",border:"1px solid #DDD0B4",borderRadius:"10px",padding:"24px",boxShadow:"0 2px 8px rgba(0,0,0,0.06)",marginBottom:"20px"}}>
+              <label style={{display:"block",fontFamily:"Georgia,serif",fontSize:"17px",fontWeight:"600",color:"#1B3A2D",marginBottom:"8px"}}>Enter Your Recipe</label>
+              <p style={{fontSize:"13px",color:"#7A6B55",margin:"0 0 12px",lineHeight:"1.5"}}>Paste ingredients, a full recipe, or both. The more detail, the better the analysis.</p>
+
+              <textarea value={recipe} onChange={e => setRecipe(e.target.value)}
+                placeholder="e.g. Butter-seared salmon with organic lemon, fresh dill, garlic, and roasted sweet potatoes in olive oil..."
+                style={{width:"100%",minHeight:"140px",padding:"12px",borderRadius:"6px",border:"1.5px solid #C8B896",background:"#FFFDF7",fontFamily:"system-ui",fontSize:"14px",color:"#2A2218",resize:"vertical",lineHeight:"1.6"}} />
+
+              <div style={{display:"flex",gap:"8px",flexWrap:"wrap",margin:"10px 0 16px"}}>
+                <span style={{fontSize:"12px",color:"#7A6B55",alignSelf:"center"}}>Try an example:</span>
+                {examples.map(ex => (
+                  <button key={ex.label} onClick={() => setRecipe(ex.text)}
+                    style={{padding:"4px 10px",borderRadius:"20px",border:"1px solid #C8B896",background:"transparent",color:"#4A3E2D",fontSize:"12px",cursor:"pointer"}}>
+                    {ex.label}
+                  </button>
+                ))}
+              </div>
+
+              <button onClick={analyze} disabled={loading || !recipe.trim()}
+                style={{width:"100%",padding:"13px",background:loading||!recipe.trim()?"#8FB49A":"#1B3A2D",color:"#F5EDD8",border:"none",borderRadius:"7px",fontFamily:"Georgia,serif",fontSize:"16px",fontWeight:"600",cursor:"pointer",letterSpacing:"0.02em"}}>
+                {loading ? "⏳ Analyzing…" : "🔬 Analyze Recipe"}
+              </button>
+            </div>
+
+            {error && (
+              <div style={{background:"#FDF0EE",border:"1px solid #F0C0B8",borderRadius:"8px",padding:"14px 18px",color:"#8B2A1A",fontSize:"14px",marginBottom:"20px"}}>⚠️ {error}</div>
+            )}
+
+            {result && (
+              <div className="fade-in" style={{background:"#FFF8EC",border:"1px solid #DDD0B4",borderRadius:"10px",overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}>
+                <div style={{background:"#1B3A2D",padding:"28px 24px",display:"flex",flexDirection:"column",alignItems:"center",gap:"10px"}}>
+                  <ScoreMeter score={result.score} animating={animating} />
+                  <p style={{color:"#D4C8A8",fontFamily:"Georgia,serif",fontSize:"15px",textAlign:"center",margin:"4px 0 0",fontStyle:"italic",maxWidth:"440px",lineHeight:"1.5"}}>"{result.verdict}"</p>
+                </div>
+
+                <div style={{padding:"20px 24px",borderBottom:"1px solid #E8DABB"}}>
+                  <p style={{color:"#3A2E1E",fontSize:"14px",lineHeight:"1.7"}}>{result.summary}</p>
+                </div>
+
+                {result.compliant_items?.length > 0 && (
+                  <div style={{padding:"18px 24px",borderBottom:"1px solid #E8DABB"}}>
+                    <h3 style={{fontSize:"12px",color:"#1B5E35",margin:"0 0 10px",letterSpacing:"0.04em",textTransform:"uppercase"}}>✅ MAHA Wins</h3>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:"6px"}}>{result.compliant_items.map((item,i) => <Tag key={i} type="good">{item}</Tag>)}</div>
+                  </div>
+                )}
+
+                {result.concerns?.length > 0 && (
+                  <div style={{padding:"18px 24px",borderBottom:"1px solid #E8DABB"}}>
+                    <h3 style={{fontSize:"12px",color:"#7A4F00",margin:"0 0 10px",letterSpacing:"0.04em",textTransform:"uppercase"}}>⚠️ Concerns</h3>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:"6px"}}>{result.concerns.map((item,i) => <Tag key={i} type="warn">{item}</Tag>)}</div>
+                  </div>
+                )}
+
+                {result.suggestions?.length > 0 && (
+                  <div style={{padding:"18px 24px"}}>
+                    <h3 style={{fontSize:"12px",color:"#1A4A72",margin:"0 0 10px",letterSpacing:"0.04em",textTransform:"uppercase"}}>💡 How to Improve</h3>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:"6px"}}>{result.suggestions.map((item,i) => <Tag key={i} type="tip">{item}</Tag>)}</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <p style={{textAlign:"center",fontSize:"12px",color:"#9A8B72",marginTop:"24px",lineHeight:"1.6"}}>
+              MAHA AI Assistant is an educational tool. Scores reflect alignment with MAHA dietary principles, not medical advice.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
