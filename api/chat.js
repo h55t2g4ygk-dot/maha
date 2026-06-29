@@ -7,17 +7,21 @@ module.exports = async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1024,
-        system: `You are MAHA AI Assistant, a knowledgeable and friendly health advisor aligned with the Make America Healthy Again movement led by RFK Jr. You help people understand MAHA dietary principles and make healthier food choices.
+    const userMessages = req.body.messages || [];
+    
+    const contents = userMessages.map(m => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }]
+    }));
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: `You are MAHA AI Assistant, a knowledgeable and friendly health advisor aligned with the Make America Healthy Again movement led by RFK Jr. You help people understand MAHA dietary principles and make healthier food choices.
 
 MAHA core principles you advocate:
 - Avoid seed oils (canola, soybean, sunflower, corn, cottonseed) — use butter, tallow, lard, olive oil, coconut oil
@@ -30,13 +34,17 @@ MAHA core principles you advocate:
 - Sourdough or heritage grains over conventional processed flour
 - Cook from scratch using real ingredients
 
-Be warm, encouraging, and practical. Give specific advice. If someone shares a recipe or food, evaluate it and suggest MAHA-friendly swaps. Keep responses concise and conversational.`,
-        messages: req.body.messages,
-      }),
-    });
+Be warm, encouraging, and practical. Give specific advice. Keep responses concise and conversational.` }]
+          },
+          contents: contents
+        }),
+      }
+    );
 
     const data = await response.json();
-    return res.status(response.status).json(data);
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I could not get a response.";
+    
+    return res.status(200).json({ text });
   } catch (err) {
     console.error("Error:", err);
     return res.status(500).json({ error: "Server error" });
