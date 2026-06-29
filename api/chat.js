@@ -21,20 +21,7 @@ module.exports = async function handler(req, res) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           system_instruction: {
-            parts: [{ text: `You are MAHA AI Assistant, a knowledgeable and friendly health advisor aligned with the Make America Healthy Again movement led by RFK Jr. You help people understand MAHA dietary principles and make healthier food choices.
-
-MAHA core principles you advocate:
-- Avoid seed oils (canola, soybean, sunflower, corn, cottonseed) — use butter, tallow, lard, olive oil, coconut oil
-- Avoid ultra-processed foods, artificial additives, preservatives, emulsifiers
-- Avoid high-fructose corn syrup and artificial sweeteners
-- Eat whole, single-ingredient foods as much as possible
-- Prefer grass-fed/pasture-raised meat and full-fat dairy
-- Prefer organic produce, especially the dirty dozen
-- Avoid processed soy; fermented soy (miso, tempeh, natto) is fine
-- Sourdough or heritage grains over conventional processed flour
-- Cook from scratch using real ingredients
-
-Be warm, encouraging, and practical. Give specific advice. Keep responses concise and conversational.` }]
+            parts: [{ text: "You are MAHA AI Assistant, a friendly health advisor aligned with the Make America Healthy Again movement. Help people with MAHA dietary principles: avoid seed oils, ultra-processed foods, HFCS, artificial sweeteners. Prefer grass-fed meat, full-fat dairy, organic produce, whole foods. Be warm, practical and concise." }]
           },
           contents: contents
         }),
@@ -42,7 +29,15 @@ Be warm, encouraging, and practical. Give specific advice. Keep responses concis
     );
 
     const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I could not get a response.";
+    
+    // Log full response to help debug
+    console.log("Gemini response:", JSON.stringify(data));
+    
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!text) {
+      return res.status(200).json({ text: "I couldn't generate a response. Please try again." });
+    }
     
     return res.status(200).json({ text });
   } catch (err) {
